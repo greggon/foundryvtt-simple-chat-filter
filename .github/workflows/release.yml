@@ -45,7 +45,7 @@ jobs:
           echo "::set-output name=new_version::$NEW_VERSION"
 
           REPO_NAME="${{ github.event.repository.name }}"
-          NEW_DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/v${NEW_VERSION}/${REPO_NAME}-${NEW_VERSION}.zip"
+          NEW_DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/v${NEW_VERSION}/module.zip"
           echo "New download URL: $NEW_DOWNLOAD_URL"
           echo "::set-output name=new_download_url::$NEW_DOWNLOAD_URL"
 
@@ -97,7 +97,11 @@ jobs:
 
           mkdir -p temp_zip_staging/$MODULE_NAME
 
-          rsync -a --exclude '.git*' --exclude '.github*' --exclude 'temp_zip_staging' ./ temp_zip_staging/$MODULE_NAME/
+          rsync -a \
+            module.json \
+            simple-chat-filter.js \
+            simple-chat-filter.css \
+            temp_zip_staging/$MODULE_NAME/
 
           cd temp_zip_staging
 
