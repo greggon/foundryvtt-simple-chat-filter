@@ -11,115 +11,179 @@ jobs:
     concurrency: release_main_${{ github.ref }}
 
     permissions:
-        contents: write
+      contents: write # Needed for checkout, commit, push, tag, release
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Required to get tags for comparison
 
       - name: Get module folder name
         id: get_folder
         run: |
-          echo "::set-output name=module_folder::${{ github.event.repository.name }}"
+          MODULE_FOLDER_NAME="${{ github.event.repository.name }}"
+          echo "module_folder=${MODULE_FOLDER_NAME}" >> $GITHUB_OUTPUT
+          echo "Using module folder name: ${MODULE_FOLDER_NAME}"
 
       - name: Configure Git User
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Read and Bump Version
         id: bump_version
         run: |
-          CURRENT_VERSION=$(jq -r '.version' module.json)
+          # Ensure jq is installed (usually is on ubuntu-latest)
+          if ! command -v jq &> /dev/null; then
+            echo "jq could not be found, installing..."
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+
+          MODULE_JSON_PATH="module.json"
+          if [ ! -f "$MODULE_JSON_PATH" ]; then
+            echo "Error: $MODULE_JSON_PATH not found!"
+            exit 1
+          fi
+
+          CURRENT_VERSION=$(jq -r '.version' "$MODULE_JSON_PATH")
           echo "Current version: $CURRENT_VERSION"
+
+          # Basic validation of version format (e.g., X.Y.Z)
+          if ! [[ "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+             echo "Error: Invalid version format in $MODULE_JSON_PATH: $CURRENT_VERSION"
+             exit 1
+          fi
 
           MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
           MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
           
           NEW_MINOR=$((MINOR + 1))
           NEW_VERSION="$MAJOR.$NEW_MINOR.0" # Increment minor, reset patch to 0
+          NEW_TAG="$NEW_VERSION"
 
           echo "New version: $NEW_VERSION"
-          echo "::set-output name=new_version::$NEW_VERSION"
+          echo "New tag: $NEW_TAG"
 
-          REPO_NAME="${{ github.event.repository.name }}"
-          NEW_DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/v${NEW_VERSION}/module.zip"
-          echo "New download URL: $NEW_DOWNLOAD_URL"
-          echo "::set-output name=new_download_url::$NEW_DOWNLOAD_URL"
+          # Set outputs using the modern GITHUB_OUTPUT method
+          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+
+          # Calculate download URL (will be correct once the release exists)
+          NEW_DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${NEW_TAG}/module.zip"
+          echo "Anticipated download URL: $NEW_DOWNLOAD_URL"
+          echo "new_download_url=${NEW_DOWNLOAD_URL}" >> $GITHUB_OUTPUT
 
           # Check if the tag for the new version already exists remotely
-          TAG="v$NEW_VERSION"
-          if git ls-remote --tags origin $TAG | grep -q $TAG; then
-            echo "Tag $TAG already exists. This push might be a re-run or merge of an already tagged version."
-            echo "::set-output name=tag_exists::true"
+          # Fetch tags explicitly to ensure local git knows about remote tags
+          git fetch --tags
+          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+            echo "Tag $NEW_TAG already exists locally or remotely. This push might be a re-run or merge of an already tagged version."
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
           else
-             echo "Tag $TAG does not exist. Proceeding with version bump and release."
-             echo "::set-output name=tag_exists::false"
+            echo "Tag $NEW_TAG does not exist. Proceeding with version bump and release."
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Update module.json
+        # Only run if the tag doesn't already exist
         if: steps.bump_version.outputs.tag_exists == 'false'
         run: |
           MODULE_JSON_PATH="module.json"
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
           NEW_DOWNLOAD_URL="${{ steps.bump_version.outputs.new_download_url }}"
 
-          jq ".version = \"$NEW_VERSION\" | .download = \"$NEW_DOWNLOAD_URL\"" "$MODULE_JSON_PATH" > "$MODULE_JSON_PATH.tmp"
-          mv "$MODULE_JSON_PATH.tmp" "$MODULE_JSON_PATH"
+          # Use jq to update the file safely
+          jq ".version = \"$NEW_VERSION\" | .download = \"$NEW_DOWNLOAD_URL\"" "$MODULE_JSON_PATH" > "$MODULE_JSON_PATH.tmp" && mv "$MODULE_JSON_PATH.tmp" "$MODULE_JSON_PATH"
 
           echo "Updated $MODULE_JSON_PATH with version $NEW_VERSION and download URL $NEW_DOWNLOAD_URL"
+          echo "--- $MODULE_JSON_PATH content ---"
           cat "$MODULE_JSON_PATH"
+          echo "--- End $MODULE_JSON_PATH content ---"
+
 
       - name: Commit and Push Updated module.json
+        # Only run if the tag doesn't already exist
         if: steps.bump_version.outputs.tag_exists == 'false'
         run: |
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
-          TAG="$NEW_VERSION"
+          NEW_TAG="${{ steps.bump_version.outputs.new_tag }}"
 
-          git add "module.json"
-          git commit -m "chore: Bump version to $NEW_VERSION [skip ci]"
-          git tag $TAG
-          git push origin main
-          git push origin $TAG
+          git add module.json
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit in module.json."
+          else
+            git commit -m "chore: Bump version to $NEW_VERSION [skip ci]"
+            git push origin main
+            echo "Committed and pushed version bump to main."
+          fi
 
-          echo "Committed version bump, created tag $TAG, and pushed to main."
+          # Create and push the tag
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+          echo "Created and pushed tag $NEW_TAG."
 
-      - name: Create module zip
+      - name: Create Module Zip
+        # Only run if the tag doesn't already exist
         if: steps.bump_version.outputs.tag_exists == 'false'
         run: |
-          MODULE_NAME="${{ steps.names.outputs.module_name }}"
-          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
+          # Use the CORRECT variable from the get_folder step
+          MODULE_FOLDER_NAME="${{ steps.get_folder.outputs.module_folder }}"
           ZIP_FILE="module.zip"
+          STAGING_DIR="temp_zip_staging"
+          TARGET_DIR="$STAGING_DIR/$MODULE_FOLDER_NAME" # Define the target directory inside staging
 
-          echo "Creating $ZIP_FILE"
+          echo "Creating $ZIP_FILE for module '$MODULE_FOLDER_NAME'"
 
-          mkdir -p temp_zip_staging/$MODULE_NAME
+          mkdir -p "$TARGET_DIR" # Create the nested directory
 
-          rsync -rptgo \
+          echo "Copying files to $TARGET_DIR/"
+          # Use rsync to copy specified files INTO the TARGET_DIR
+          # Ensure files actually exist before trying to copy
+          rsync -av \
             --exclude '.git*' \
             --exclude '.github*' \
-            --exclude 'temp_zip_staging' \
+            --exclude "$STAGING_DIR" \
+            --exclude "$ZIP_FILE" \
             module.json \
             simple-chat-filter.js \
             simple-chat-filter.css \
-            temp_zip_staging/$MODULE_NAME/
+            "$TARGET_DIR/"
 
-          cd temp_zip_staging
+          echo "Contents of staging directory ($TARGET_DIR):"
+          ls -lR "$TARGET_DIR"
 
-          zip -r "../$ZIP_FILE" "$MODULE_NAME/"
+          # Change to the STAGING directory (one level above the module folder)
+          cd "$STAGING_DIR"
 
+          echo "Creating zip archive..."
+          # Zip the MODULE_FOLDER_NAME directory itself
+          # This creates a zip containing one top-level folder: $MODULE_FOLDER_NAME
+          zip -r "../$ZIP_FILE" "$MODULE_FOLDER_NAME/"
+
+          # Go back to the original directory
           cd ..
-          rm -rf temp_zip_staging
+
+          # Clean up the staging directory
+          echo "Cleaning up staging directory..."
+          rm -rf "$STAGING_DIR"
 
           echo "Zip created: $ZIP_FILE"
           ls -lh "$ZIP_FILE"
 
       - name: Create GitHub Release
+        # Only run if the tag doesn't already exist
         if: steps.bump_version.outputs.tag_exists == 'false'
-        uses: softprops/action-gh-release@v1 
+        uses: softprops/action-gh-release@v2 # Use v2 for latest features/fixes
         with:
-          files: module.zip
+          tag_name: ${{ steps.bump_version.outputs.new_tag }} # Explicitly use the tag created
+          name: Release ${{ steps.bump_version.outputs.new_version }} # Release title
+          body: | # Optional: Add release notes
+            Automatic release for version ${{ steps.bump_version.outputs.new_version }}.
+            See [module.json](module.json) for details.
+          draft: false
+          prerelease: false
+          files: module.zip # The zip file created in the previous step
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # The token is implicitly passed by default but good practice to be explicit
