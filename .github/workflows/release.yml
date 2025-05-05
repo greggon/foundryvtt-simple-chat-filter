@@ -1,0 +1,111 @@
+name: Auto-Minor Version Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  auto-release:
+    runs-on: ubuntu-latest
+    concurrency: release_main_${{ github.ref }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get module folder name
+        id: get_folder
+        run: |
+          echo "::set-output name=module_folder::${{ github.event.repository.name }}"
+
+      - name: Configure Git User
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Read and Bump Version
+        id: bump_version
+        run: |
+          MODULE_FOLDER="${{ steps.get_folder.outputs.module_folder }}"
+          MODULE_JSON_PATH="$MODULE_FOLDER/module.json"
+
+          CURRENT_VERSION=$(jq -r '.version' "$MODULE_JSON_PATH")
+          echo "Current version: $CURRENT_VERSION"
+
+          MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
+          MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
+          
+          NEW_MINOR=$((MINOR + 1))
+          NEW_VERSION="$MAJOR.$NEW_MINOR.0" # Increment minor, reset patch to 0
+
+          echo "New version: $NEW_VERSION"
+          echo "::set-output name=new_version::$NEW_VERSION"
+
+          REPO_NAME="${{ github.event.repository.name }}"
+          NEW_DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/v${NEW_VERSION}/${REPO_NAME}-${NEW_VERSION}.zip"
+          echo "New download URL: $NEW_DOWNLOAD_URL"
+          echo "::set-output name=new_download_url::$NEW_DOWNLOAD_URL"
+
+          # Check if the tag for the new version already exists remotely
+          TAG="v$NEW_VERSION"
+          if git ls-remote --tags origin $TAG | grep -q $TAG; then
+            echo "Tag $TAG already exists. This push might be a re-run or merge of an already tagged version."
+            echo "::set-output name=tag_exists::true"
+          else
+             echo "Tag $TAG does not exist. Proceeding with version bump and release."
+             echo "::set-output name=tag_exists::false"
+          fi
+
+      - name: Update module.json
+        if: steps.bump_version.outputs.tag_exists == 'false'
+        run: |
+          MODULE_FOLDER="${{ steps.get_folder.outputs.module_folder }}"
+          MODULE_JSON_PATH="$MODULE_FOLDER/module.json"
+          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
+          NEW_DOWNLOAD_URL="${{ steps.bump_version.outputs.new_download_url }}"
+
+          jq ".version = \"$NEW_VERSION\" | .download = \"$NEW_DOWNLOAD_URL\"" "$MODULE_JSON_PATH" > "$MODULE_JSON_PATH.tmp"
+          mv "$MODULE_JSON_PATH.tmp" "$MODULE_JSON_PATH"
+
+          echo "Updated $MODULE_JSON_PATH with version $NEW_VERSION and download URL $NEW_DOWNLOAD_URL"
+          cat "$MODULE_JSON_PATH"
+
+      - name: Commit and Push Updated module.json
+        if: steps.bump_version.outputs.tag_exists == 'false'
+        run: |
+          MODULE_FOLDER="${{ steps.get_folder.outputs.module_folder }}"
+          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
+          TAG="v$NEW_VERSION"
+
+          git add "$MODULE_FOLDER/module.json"
+          git commit -m "chore: Bump version to $NEW_VERSION [skip ci]"
+          git tag $TAG
+          git push origin main
+          git push origin $TAG
+
+          echo "Committed version bump, created tag $TAG, and pushed to main."
+
+      - name: Create module zip
+        if: steps.bump_version.outputs.tag_exists == 'false'
+        run: |
+          MODULE_FOLDER="${{ steps.get_folder.outputs.module_folder }}"
+          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
+          ZIP_FILE="${MODULE_FOLDER}-${NEW_VERSION}.zip"
+
+          echo "Creating $ZIP_FILE from $MODULE_FOLDER"
+
+          zip -r "$ZIP_FILE" "$MODULE_FOLDER/"
+
+          echo "Zip created: $ZIP_FILE"
+          ls -lh "$ZIP_FILE"
+
+      - name: Create GitHub Release
+        if: steps.bump_version.outputs.tag_exists == 'false'
+        uses: softprops/action-gh-release@v1 
+        with:
+          files: ${{ steps.get_folder.outputs.module_folder }}-${{ steps.bump_version.outputs.new_version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
