@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     concurrency: release_main_${{ github.ref }}
 
+    permissions:
+        contents: write
+        releases: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
