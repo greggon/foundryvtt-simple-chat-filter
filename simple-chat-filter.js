@@ -24,6 +24,11 @@ Hooks.on('renderChatLog', (app, html, data) => {
                 message.hide();
             }
         });
+
+        //If the filter is empty, scroll down to the latest message. Otherwise if you clear the filter, chat 
+        //will remain offset by the filter
+        if(!filterText)
+            app.scrollBottom();
     };
 
     filterInput.on('input', applyFilter);
