@@ -29,10 +29,7 @@ jobs:
       - name: Read and Bump Version
         id: bump_version
         run: |
-          MODULE_FOLDER="${{ steps.get_folder.outputs.module_folder }}"
-          MODULE_JSON_PATH="$MODULE_FOLDER/module.json"
-
-          CURRENT_VERSION=$(jq -r '.version' "$MODULE_JSON_PATH")
+          CURRENT_VERSION=$(jq -r '.version' module.json)
           echo "Current version: $CURRENT_VERSION"
 
           MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
@@ -62,8 +59,7 @@ jobs:
       - name: Update module.json
         if: steps.bump_version.outputs.tag_exists == 'false'
         run: |
-          MODULE_FOLDER="${{ steps.get_folder.outputs.module_folder }}"
-          MODULE_JSON_PATH="$MODULE_FOLDER/module.json"
+          MODULE_JSON_PATH="module.json"
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
           NEW_DOWNLOAD_URL="${{ steps.bump_version.outputs.new_download_url }}"
 
@@ -76,11 +72,10 @@ jobs:
       - name: Commit and Push Updated module.json
         if: steps.bump_version.outputs.tag_exists == 'false'
         run: |
-          MODULE_FOLDER="${{ steps.get_folder.outputs.module_folder }}"
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
-          TAG="v$NEW_VERSION"
+          TAG="$NEW_VERSION"
 
-          git add "$MODULE_FOLDER/module.json"
+          git add "module.json"
           git commit -m "chore: Bump version to $NEW_VERSION [skip ci]"
           git tag $TAG
           git push origin main
@@ -91,13 +86,23 @@ jobs:
       - name: Create module zip
         if: steps.bump_version.outputs.tag_exists == 'false'
         run: |
-          MODULE_FOLDER="${{ steps.get_folder.outputs.module_folder }}"
+          MODULE_NAME="${{ steps.names.outputs.module_name }}"
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
-          ZIP_FILE="${MODULE_FOLDER}-${NEW_VERSION}.zip"
+          ZIP_FILE="module.zip"
 
-          echo "Creating $ZIP_FILE from $MODULE_FOLDER"
+          echo "Creating $ZIP_FILE"
 
-          zip -r "$ZIP_FILE" "$MODULE_FOLDER/"
+          mkdir temp_zip_staging
+          mkdir temp_zip_staging/$MODULE_NAME
+
+          rsync -a --exclude '.git*' --exclude '.github*' --exclude 'temp_zip_staging' ./ temp_zip_staging/$MODULE_NAME/
+
+          cd temp_zip_staging
+
+          zip -r "../$ZIP_FILE" "$MODULE_NAME/"
+
+          cd ..
+          rm -rf temp_zip_staging
 
           echo "Zip created: $ZIP_FILE"
           ls -lh "$ZIP_FILE"
@@ -106,6 +111,6 @@ jobs:
         if: steps.bump_version.outputs.tag_exists == 'false'
         uses: softprops/action-gh-release@v1 
         with:
-          files: ${{ steps.get_folder.outputs.module_folder }}-${{ steps.bump_version.outputs.new_version }}.zip
+          files: module.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
