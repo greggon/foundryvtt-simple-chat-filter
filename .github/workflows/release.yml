@@ -97,7 +97,10 @@ jobs:
 
           mkdir -p temp_zip_staging/$MODULE_NAME
 
-          rsync -a \
+          rsync -rptgo \
+            --exclude '.git*' \
+            --exclude '.github*' \
+            --exclude 'temp_zip_staging' \
             module.json \
             simple-chat-filter.js \
             simple-chat-filter.css \
