@@ -10,8 +10,8 @@ Hooks.on('renderChatLog', (app, html, data) => {
 
     chatControls.before(filterInput);
 
-    filterInput.on('input', (event) => {
-        const filterText = event.target.value.toLowerCase();
+    const applyFilter = () => {
+        const filterText = filterInput.val().toLowerCase();
         const messages = html.find('#chat-log .message');
 
         messages.each(function() {
@@ -24,10 +24,20 @@ Hooks.on('renderChatLog', (app, html, data) => {
                 message.hide();
             }
         });
-    });
+    };
+
+    filterInput.on('input', applyFilter);
+
+    filterInput.on('keydown', (event) => {
+        if(event.key ==='Escape' || event.keyCode ===27) {
+            event.preventDefault();
+            filterInput.val('');
+            applyFilter();
+        }
+    })
 
     app.element.on('click', 'a.header-button.close', () => {
         filterInput.val('');
-        html.find('#chat-log .message').show();
+        applyFilter();
     });
 });
