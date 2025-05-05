@@ -1,15 +1,19 @@
 {
   "id": "simple-chat-filter",
   "title": "Simple Chat Filter",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "compatibility": {
     "minimum": "12",
     "verified": "12"
   },
-  "esmodules": ["./simple-chat-filter.js"],  
-  "styles": ["./simple-chat-filter.css"],
+  "esmodules": [
+    "./simple-chat-filter.js"
+  ],
+  "styles": [
+    "./simple-chat-filter.css"
+  ],
   "description": "Adds a text box to the chat to filter messages by content.",
   "url": "https://github.com/greggon/foundryvtt-simple-chat-filter",
   "manifest": "https://github.com/greggon/foundryvtt-simple-chat-filter/releases/latest/download/module.json",
-  "download": "https://github.com/greggon/foundryvtt-simple-chat-filter/releases/download/1.0.0/module.zip"
+  "download": "https://github.com/greggon/foundryvtt-simple-chat-filter/releases/download/v1.1.0/foundryvtt-simple-chat-filter-1.1.0.zip"
 }
