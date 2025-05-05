@@ -95,8 +95,7 @@ jobs:
 
           echo "Creating $ZIP_FILE"
 
-          mkdir temp_zip_staging
-          mkdir temp_zip_staging/$MODULE_NAME
+          mkdir -p temp_zip_staging/$MODULE_NAME
 
           rsync -a --exclude '.git*' --exclude '.github*' --exclude 'temp_zip_staging' ./ temp_zip_staging/$MODULE_NAME/
 
